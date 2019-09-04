@@ -34,7 +34,7 @@ Example:
                     ),
                 ),
                 jobs=dict(
-                    test_job=dict(
+                    records_simple_reindex=dict(
                         cls='invenio_index_migrator.api.ReindexJob',
                         pid_type='recid',
                         index='records-record-v1.0.0',

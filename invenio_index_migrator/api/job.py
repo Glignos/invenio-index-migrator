@@ -34,7 +34,13 @@ class Job(object):
     """Index migration job."""
 
     def __init__(self, name, migration, config):
-        """Initialize a migration job."""
+        """Initialize a migration job.
+
+        :param name: job's name.
+        :param migration: an invenio_index_migrator.api.migration.Migration
+            object.
+        :param config: job's configuration.
+        """
         self.name = name
         self.migration = migration
         self.config = config
@@ -61,7 +67,7 @@ class Job(object):
 
     def status(self):
         """Return the status of the job."""
-        job_state = self.state.state
+        job_state = self.state.read()
         current = {}
         current['completed'] = False
         current['last_updated'] = str(datetime.fromtimestamp(
@@ -111,7 +117,7 @@ class Job(object):
             )
         print('[*] created index: {}'.format(index_name))
 
-        state = self.state.state
+        state = self.state.read()
         state['dst']['index'] = index_name
         self.state.commit(state)
 
@@ -127,7 +133,7 @@ class ReindexJob(Job):
         source_params = reindex_params.pop('source', {})
         dest_params = reindex_params.pop('dest', {})
 
-        state = self.state.state
+        state = self.state.read()
         payload = dict(
             source=dict(
                 index=state['src']['index'],
@@ -147,7 +153,7 @@ class ReindexJob(Job):
         # Reindex using ES Reindex API synchronously
         # Keep track of the time we issued the reindex command
         start_date = datetime.utcnow()
-        wait_for_completion = self.config.get('wait_for_completion') or False
+        wait_for_completion = self.config.get('wait_for_completion', False)
         response = current_search_client.reindex(
             wait_for_completion=wait_for_completion,
             body=payload
@@ -167,7 +173,7 @@ class ReindexJob(Job):
 
     def cancel(self):
         """Cancel reindexing job."""
-        state = self.state.state
+        state = self.state.read()
         task_id = state['reindex_task_id']
         cancel_response = current_search_client.tasks.cancel(task_id)
         state['status'] = 'CANCELLED'
@@ -205,7 +211,7 @@ class ReindexAndSyncJob(ReindexJob):
         ).yield_per(500)  # TODO: parameterize
 
         for record_id, pid_status, pid_type in q:
-            _dst = self.state.state['dst']
+            _dst = self.state.read()['dst']
             _index = _dst['index']
             _doc_type = _dst['doc_type']
             payload = {'id': record_id, 'index': _index, 'doc_type': _doc_type}
@@ -217,7 +223,7 @@ class ReindexAndSyncJob(ReindexJob):
 
     def run_delta_job(self):
         """Calculate delta from DB changes since the last update."""
-        state = self.state.state
+        state = self.state.read()
         # Check if reindex task is running - abort
         task = current_search_client.tasks.get(
             task_id=state['reindex_task_id'])
@@ -258,10 +264,10 @@ class ReindexAndSyncJob(ReindexJob):
     def run(self):
         """Run reindexing and syncing job."""
         if not self.config.get('wait_for_completion', False):
-            if self.state.state['reindex_task_id']:
+            if self.state.read()['reindex_task_id']:
                 return self.run_delta_job()
         else:
-            if self.state.state['status'] != 'COMPLETED':
+            if self.state.read()['status'] != 'COMPLETED':
                 return super(ReindexAndSyncJob, self).run()
 
     def cancel(self):
