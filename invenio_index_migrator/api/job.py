@@ -70,18 +70,17 @@ class Job(object):
         job_state = self.state.read()
         current = {}
         current['completed'] = False
-        current['last_updated'] = str(datetime.fromtimestamp(
-            float(job_state['last_record_update'])))
+        current['last_updated'] = job_state['last_record_update']
         current['queue_size'] = get_queue_size(SYNC_INDEXER_MQ_QUEUE)
         if job_state['reindex_task_id']:
             task = current_search_client.tasks.get(
                 task_id=job_state['reindex_task_id'])
+            current['total'] = task['task']['status']['total']
             current['_es_task_response'] = task
             current['completed'] = task['completed']
             if task['completed']:
                 current['status'] = 'Finished reindex'
                 current['seconds'] = task['response']['took'] / 1000.0
-                current['total'] = task['task']['status']['total']
             else:
                 current['status'] = 'Reindexing...'
                 current['duration'] = '{:.1f} second(s)'.format(
@@ -92,7 +91,7 @@ class Job(object):
                 current['percent'] = \
                     100.0 * current['current'] / current['total']
             current['created'] = task['task']['status']['created']
-            current['total'] = task['task']['status']['total']
+
         else:
             current['status'] = 'Finished'
         current['threshold_reached'] = job_state['threshold_reached']
@@ -105,7 +104,7 @@ class Job(object):
             create_write_alias=False
         )
         index_name = index_result[0]
-        refresh_interval = self.config.get('refresh_interval', '60s')
+        refresh_interval = self.config.get('refresh_interval', '-1')
         if refresh_interval:
             current_search_client.indices.put_settings(
                 index=index_name,
@@ -271,9 +270,8 @@ class ReindexAndSyncJob(ReindexJob):
 
     def run(self):
         """Run reindexing and syncing job."""
-        if not self.config.get('wait_for_completion', False):
-            if self.state.read()['reindex_task_id']:
-                return self.run_delta_job()
+        if self.state.read()['reindex_task_id']:
+            return self.run_delta_job()
         else:
             if self.state.read()['status'] != 'COMPLETED':
                 return super(ReindexAndSyncJob, self).run()
